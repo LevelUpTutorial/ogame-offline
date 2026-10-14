@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Offline Strategy PoC</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            background-color: #0f172a;
+            color: #f8fafc;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .phone-container {
+            width: 100%;
+            max-width: 420px;
+            height: 100vh;
+            max-height: 850px;
+            background-color: #1e293b;
+            border-radius: 24px;
+            box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.5);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border: 4px solid #334155;
+        }
+        header {
+            padding: 20px;
+            background-color: #0f172a;
+            text-align: center;
+            font-size: 1.25rem;
+            font-weight: bold;
+            border-bottom: 1px solid #334155;
+        }
+        .content {
+            flex: 1;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            overflow-y: auto;
+        }
+        .card {
+            background-color: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 16px;
+        }
+        .card-title {
+            font-size: 0.9rem;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 12px;
+        }
+        .resources-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            text-align: center;
+        }
+        .resource-box {
+            background-color: #1e293b;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #475569;
+        }
+        .resource-value {
+            font-size: 1.4rem;
+            font-weight: bold;
+            margin: 4px 0;
+            color: #38bdf8;
+        }
+        .resource-rate {
+            font-size: 0.75rem;
+            color: #94a3b8;
+        }
+        .queue-status {
+            font-size: 1rem;
+            font-weight: 500;
+        }
+        .action-button {
+            background-color: #0284c7;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            padding: 16px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            margin-top: auto;
+        }
+        .action-button:active {
+            background-color: #0369a1;
+        }
+        .action-button:disabled {
+            background-color: #475569;
+            color: #94a3b8;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="phone-container">
+        <header>Space Strategy PoC</header>
+        
+        <div class="content">
+            <!-- Resources Card -->
+            <div class="card">
+                <div class="card-title">Planet Resources</div>
+                <div class="resources-grid">
+                    <div class="resource-box">
+                        <div>Metal</div>
+                        <div id="metalVal" class="resource-value">500.0</div>
+                        <div id="metalRate" class="resource-rate">+60/min</div>
+                    </div>
+                    <div class="resource-box">
+                        <div>Crystal</div>
+                        <div id="crystalVal" class="resource-value">200.0</div>
+                        <div id="crystalRate" class="resource-rate">+30/min</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Queue Card -->
+            <div class="card">
+                <div class="card-title">Construction Queue</div>
+                <div id="queueStatus" class="queue-status">Idle</div>
+            </div>
+
+            <!-- Action Button -->
+            <button id="buildBtn" class="action-button" onclick="startBuilding()">Build Solar Plant (Cost: 100 Metal)</button>
+        </div>
+    </div>
+
+    <script>
+        // Game State Object
+        let gameState = {
+            metal: 500.0,
+            crystal: 200.0,
+            metalProdPerSec: 1.0,     // 60 per minute
+            crystalProdPerSec: 0.5,   // 30 per minute
+            lastSavedTimestamp: Date.now(),
+            activeQueue: null         // { name: string, finishTime: timestamp }
+        };
+
+        // Load saved state from browser LocalStorage if it exists
+        function loadGame() {
+            const saved = localStorage.getItem('space_strategy_save');
+            if (saved) {
+                gameState = JSON.parse(saved);
+                processOfflineProgress();
+            }
+        }
+
+        // Save state to browser LocalStorage
+        function saveGame() {
+            gameState.lastSavedTimestamp = Date.now();
+            localStorage.setItem('space_strategy_save', JSON.stringify(gameState));
+        }
+
+        // Calculate resources and queue progress accumulated while away
+        function processOfflineProgress() {
+            const now = Date.now();
+            const elapsedSeconds = (now - gameState.lastSavedTimestamp) / 1000.0;
+
+            if (elapsedSeconds > 0) {
+                // Accrue resources
+                gameState.metal += gameState.metalProdPerSec * elapsedSeconds;
+                gameState.crystal += gameState.crystalProdPerSec * elapsedSeconds;
+
+                // Check if queue completed while offline
+                if (gameState.activeQueue) {
+                    if (now >= gameState.activeQueue.finishTime) {
+                        gameState.metalProdPerSec += 0.5; // Reward
+                        gameState.activeQueue = null;
+                    }
+                }
+                gameState.lastSavedTimestamp = now;
+            }
+        }
+
+        // Main game loop running every second
+        function gameTick() {
+            const now = Date.now();
+            const elapsedSeconds = (now - gameState.lastSavedTimestamp) / 1000.0;
+
+            if (elapsedSeconds >= 1.0) {
+                gameState.metal += gameState.metalProdPerSec * elapsedSeconds;
+                gameState.crystal += gameState.crystalProdPerSec * elapsedSeconds;
+                gameState.lastSavedTimestamp = now;
+
+                // Check active queue completion
+                if (gameState.activeQueue && now >= gameState.activeQueue.finishTime) {
+                    gameState.metalProdPerSec += 0.5;
+                    gameState.activeQueue = null;
+                }
+
+                saveGame();
+                updateUI();
+            }
+        }
+
+        // Start a building action
+        function startBuilding() {
+            if (!gameState.activeQueue && gameState.metal >= 100) {
+                gameState.metal -= 100;
+                gameState.activeQueue = {
+                    name: 'Solar Plant Level 1',
+                    finishTime: Date.now() + (30 * 1000) // 30 seconds build time
+                };
+                saveGame();
+                updateUI();
+            }
+        }
+
+        // Update HTML elements
+        function updateUI() {
+            document.getElementById('metalVal').innerText = gameState.metal.toFixed(1);
+            document.getElementById('crystalVal').innerText = gameState.crystal.toFixed(1);
+            
+            document.getElementById('metalRate').innerText = `+${(gameState.metalProdPerSec * 60).toFixed(0)}/min`;
+            document.getElementById('crystalRate').innerText = `+${(gameState.crystalProdPerSec * 60).toFixed(0)}/min`;
+
+            const queueEl = document.getElementById('queueStatus');
+            const buildBtn = document.getElementById('buildBtn');
+
+            if (gameState.activeQueue) {
+                const remainingSecs = Math.ceil((gameState.activeQueue.finishTime - Date.now()) / 1000);
+                if (remainingSecs > 0) {
+                    queueEl.innerText = `${gameState.activeQueue.name}: ${remainingSecs}s remaining`;
+                    buildBtn.disabled = true;
+                } else {
+                    gameState.metalProdPerSec += 0.5;
+                    gameState.activeQueue = null;
+                    queueEl.innerText = 'Idle';
+                    buildBtn.disabled = false;
+                }
+            } else {
+                queueEl.innerText = 'Idle';
+                buildBtn.disabled = gameState.metal < 100;
+            }
+        }
+
+        // Initialize on load
+        loadGame();
+        updateUI();
+
+        // Run tick every second
+        setInterval(gameTick, 1000);
+
+        // Save state when user switches tabs or closes browser
+        window.addEventListener('beforeunload', saveGame);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') saveGame();
+        });
+    </script>
+</body>
+</html>
